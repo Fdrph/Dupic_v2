@@ -16,6 +16,7 @@
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <shellapi.h>
 #undef COLOR_BACKGROUND
 #endif
 
@@ -57,13 +58,13 @@ struct PreviewReady { int gi, ji; void* pixels; int w, h, ch; };
 static constexpr int MAX_DONE_INFLIGHT = 2;
 static constexpr int RESERVE_GROUPS = 512;
 
-static std::mutex              g_loaderMtx;
-static std::condition_variable g_loaderCV;
+static std::mutex                g_loaderMtx;
+static std::condition_variable   g_loaderCV;
 static std::queue<PreviewWork>   g_workQueue;
 static std::vector<PreviewReady> g_doneQueue;
-static bool                    g_workStop     = false;
-static int                     g_doneInflight = 0;
-static std::vector<std::thread> g_loaderThreads;
+static bool                      g_workStop     = false;
+static int                       g_doneInflight = 0;
+static std::vector<std::thread>  g_loaderThreads;
 
 // Vips pipeline: flatten alpha, convert to sRGB UCHAR, write to tightly-packed CPU buffer.
 // Frees img on all paths. Caller must g_free() the returned mem on success.
@@ -383,11 +384,13 @@ void UpdateLayout() {
             CLAY(CLAY_ID("SetFolder"), {
                 .layout = { .sizing = { CLAY_SIZING_FIXED(45), CLAY_SIZING_FIXED(40) },
                              .padding = {.left=5, .right=5, .top=5, .bottom=5} },
-                .backgroundColor = Clay_Hovered() ? cHover : cNone,
+                .backgroundColor = cNone,
                 .cornerRadius = CLAY_CORNER_RADIUS(4),
                 .image = { .imageData = g_folderIconTex }
             }) {
-                if (Clay_Hovered() && g_mouseLeftPressed) OpenFolderDialog();
+                bool hov = Clay_Hovered();
+                SDL_SetTextureAlphaMod(g_folderIconTex, hov ? 204 : 102);
+                if (hov && g_mouseLeftPressed) OpenFolderDialog();
             }
 
             CLAY(CLAY_ID("PathDisplay"), {
@@ -660,6 +663,18 @@ void UpdateLayout() {
                         .backgroundColor = Clay_Hovered() ? cHover : cBtn,
                         .cornerRadius = CLAY_CORNER_RADIUS(2)
                     }) {
+                        if (Clay_Hovered() && g_mouseLeftPressed && !selectedImagePath.empty()) {
+                            #ifdef _WIN32
+                            std::string args = "/select,\"" + selectedImagePath + "\"";
+                            ShellExecuteA(nullptr, "open", "explorer.exe", args.c_str(), nullptr, SW_SHOWDEFAULT);
+                            #elif defined(__APPLE__)
+                            std::string path = selectedImagePath;
+                            std::thread([path]() { std::system(("open -R \"" + path + "\"").c_str()); }).detach();
+                            #else
+                            std::string dir = std::filesystem::path(selectedImagePath).parent_path().string();
+                            std::thread([dir]() { std::system(("xdg-open \"" + dir + "\"").c_str()); }).detach();
+                            #endif
+                        }
                         CLAY_TEXT(CLAY_STRING("Locate on Disk"), CLAY_TEXT_CONFIG({ .textColor = cText, .fontSize = 14 }));
                     }
                 }
