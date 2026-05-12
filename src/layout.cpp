@@ -21,6 +21,7 @@
 #endif
 
 #include "clay.h"
+#include "core/types.h"
 #include "layout.h"
 #include "scan.h"
 
@@ -28,7 +29,7 @@ extern SDL_Window*   g_window;
 extern SDL_Renderer* g_sdlRenderer;
 extern Uint32        g_folderDialogEvent;
 extern bool          g_mouseLeftDown, g_mouseLeftPressed, g_mouseRightPressed;
-extern float         g_fps;
+extern f32         g_fps;
 extern bool          g_scanning;
 extern SDL_Texture*  g_folderIconTex;
 extern SDL_Texture*  g_minimizeIconTex;
@@ -37,7 +38,7 @@ extern SDL_Texture*  g_closeIconTex;
 extern SDL_Texture*  g_markOverlayTex;
 extern bool          g_shouldClose;
 extern bool          g_pendingMaximize;
-extern float         strictnessSlider;
+extern f32         strictnessSlider;
 extern std::string   currentPath, selectedImagePath, selectedImageRes, selectedImageSize;
 extern std::vector<std::string> selectedFolders;
 extern std::vector<std::vector<std::string>> duplicateGroups;
@@ -47,28 +48,28 @@ static std::string NiceBytes(uintmax_t bytes);
 // Both vectors are parallel to duplicateGroups[gi][ji]
 static std::vector<std::vector<SDL_Texture*>> g_thumbTextures;
 static std::vector<std::vector<SDL_Texture*>> g_previewTextures;
-static int g_selGi = -1, g_selJi = -1;
+static i32 g_selGi = -1, g_selJi = -1;
 static std::unordered_set<std::string> g_markedPaths;
 
 // ── Async preview loader ─────────────────────────────────────────────────────
-struct PreviewWork  { int gi, ji; std::string path; };
-struct PreviewReady { int gi, ji; void* pixels; int w, h, ch; };
+struct PreviewWork  { i32 gi, ji; std::string path; };
+struct PreviewReady { i32 gi, ji; void* pixels; i32 w, h, ch; };
 
 // At most this many images decompress simultaneously, bounding peak CPU RAM.
-static constexpr int MAX_DONE_INFLIGHT = 2;
-static constexpr int RESERVE_GROUPS = 512;
+static constexpr i32 MAX_DONE_INFLIGHT = 2;
+static constexpr i32 RESERVE_GROUPS = 512;
 
 static std::mutex                g_loaderMtx;
 static std::condition_variable   g_loaderCV;
 static std::queue<PreviewWork>   g_workQueue;
 static std::vector<PreviewReady> g_doneQueue;
 static bool                      g_workStop     = false;
-static int                       g_doneInflight = 0;
+static i32                       g_doneInflight = 0;
 static std::vector<std::thread>  g_loaderThreads;
 
 // Vips pipeline: flatten alpha, convert to sRGB UCHAR, write to tightly-packed CPU buffer.
 // Frees img on all paths. Caller must g_free() the returned mem on success.
-struct RawPixels { void* mem; int w, h, ch; };
+struct RawPixels { void* mem; i32 w, h, ch; };
 static RawPixels VipsToRaw(VipsImage* img) 
 {
     VipsImage* tmp = nullptr;
@@ -87,9 +88,9 @@ static RawPixels VipsToRaw(VipsImage* img)
 
     size_t sz;
     void* mem = vips_image_write_to_memory(img, &sz);
-    int w = vips_image_get_width(img);
-    int h = vips_image_get_height(img);
-    int ch = vips_image_get_bands(img);
+    i32 w = vips_image_get_width(img);
+    i32 h = vips_image_get_height(img);
+    i32 ch = vips_image_get_bands(img);
 
     g_object_unref(img);
     return {mem, w, h, ch};
@@ -163,19 +164,19 @@ void QueueAllPreviews() {
     {
         std::lock_guard lk(g_loaderMtx);
         g_workStop = false;
-        for (int gi = 0; gi < (int)duplicateGroups.size(); gi++)
-            for (int ji = 0; ji < (int)duplicateGroups[gi].size(); ji++)
+        for (i32 gi = 0; gi < (i32)duplicateGroups.size(); gi++)
+            for (i32 ji = 0; ji < (i32)duplicateGroups[gi].size(); ji++)
                 g_workQueue.push({gi, ji, duplicateGroups[gi][ji]});
     }
-    int hw = (int)std::thread::hardware_concurrency();
-    int avail = hw > 2 ? hw - 2 : 1;
-    int n = avail < MAX_DONE_INFLIGHT ? avail : MAX_DONE_INFLIGHT;
-    for (int i = 0; i < n; i++)
+    i32 hw = (i32)std::thread::hardware_concurrency();
+    i32 avail = hw > 2 ? hw - 2 : 1;
+    i32 n = avail < MAX_DONE_INFLIGHT ? avail : MAX_DONE_INFLIGHT;
+    for (i32 i = 0; i < n; i++)
         g_loaderThreads.emplace_back(LoaderWorker);
     g_loaderCV.notify_all();
 }
 
-static void OnImageClicked(int gi, int ji) {
+static void OnImageClicked(i32 gi, i32 ji) {
     g_selGi = gi;
     g_selJi = ji;
     selectedImagePath = duplicateGroups[gi][ji];
@@ -222,10 +223,10 @@ void ClearTextureCache() {
     g_markedPaths.clear();
 }
 
-static void SDLCALL FolderDialogCallback(void*, const char* const* filelist, int) {
+static void SDLCALL FolderDialogCallback(void*, const char* const* filelist, i32) {
     if (!filelist || !filelist[0]) return;
     auto* paths = new std::vector<std::string>();
-    for (int i = 0; filelist[i]; i++) paths->emplace_back(filelist[i]);
+    for (i32 i = 0; filelist[i]; i++) paths->emplace_back(filelist[i]);
     SDL_Event ev;
     SDL_memset(&ev, 0, sizeof(ev));
     ev.type       = g_folderDialogEvent;
@@ -243,8 +244,8 @@ void FindDuplicates() {}
 
 static std::string NiceBytes(uintmax_t bytes) {
     const char* units[] = {"B", "KB", "MB", "GB"};
-    int i = 0;
-    double n = (double)bytes;
+    i32 i = 0;
+    f64 n = (f64)bytes;
     while (n >= 1024.0 && i < 3) { n /= 1024.0; i++; }
     char buf[32];
     snprintf(buf, sizeof(buf), "%.1f %s", n, units[i]);
@@ -280,8 +281,8 @@ void UpdateLayout() {
             SDL_Texture* tex = SDL_CreateTexture(g_sdlRenderer, fmt, SDL_TEXTUREACCESS_STATIC, r.w, r.h);
             if (tex) SDL_UpdateTexture(tex, nullptr, r.pixels, r.w * r.ch);
             g_free(r.pixels);
-            if (tex && r.gi < (int)g_previewTextures.size() &&
-                       r.ji < (int)g_previewTextures[r.gi].size() &&
+            if (tex && r.gi < (i32)g_previewTextures.size() &&
+                       r.ji < (i32)g_previewTextures[r.gi].size() &&
                        !g_previewTextures[r.gi][r.ji])
                 g_previewTextures[r.gi][r.ji] = tex;
             else if (tex)
@@ -325,7 +326,7 @@ void UpdateLayout() {
             {
                 static char fpsBuf[16];
                 snprintf(fpsBuf, sizeof(fpsBuf), "%.0f fps", g_fps);
-                Clay_String s = { .length = (int32_t)strlen(fpsBuf), .chars = fpsBuf };
+                Clay_String s = { .length = (i32)strlen(fpsBuf), .chars = fpsBuf };
                 CLAY_TEXT(s, CLAY_TEXT_CONFIG({ .textColor = {120, 120, 120, 255}, .fontSize = 12 }));
             }
 
@@ -400,7 +401,7 @@ void UpdateLayout() {
                 .backgroundColor = cPath,
                 .cornerRadius = CLAY_CORNER_RADIUS(2)
             }) {
-                Clay_String s = { .length = (int32_t)currentPath.size(), .chars = currentPath.c_str() };
+                Clay_String s = { .length = (i32)currentPath.size(), .chars = currentPath.c_str() };
                 CLAY_TEXT(s, CLAY_TEXT_CONFIG({ .textColor = cText, .fontSize = 15 }));
             }
 
@@ -415,7 +416,7 @@ void UpdateLayout() {
                 static bool s_sliderDragging = false;
                 Clay_BoundingBox sb = Clay_GetElementData(Clay_GetElementId(CLAY_STRING("Slider"))).boundingBox;
                 if (sb.width > 0) {
-                    float mx, my;
+                    f32 mx, my;
                     SDL_GetMouseState(&mx, &my);
                     if (g_mouseLeftPressed && mx >= sb.x && mx <= sb.x + sb.width &&
                         my >= sb.y - 8.0f && my <= sb.y + sb.height + 8.0f)
@@ -423,14 +424,14 @@ void UpdateLayout() {
                     if (!g_mouseLeftDown)
                         s_sliderDragging = false;
                     if (s_sliderDragging) {
-                        float t = (mx - sb.x) / sb.width;
+                        f32 t = (mx - sb.x) / sb.width;
                         if (t < 0.0f) t = 0.0f;
                         if (t > 1.0f) t = 1.0f;
                         strictnessSlider = 1.0f + t * 9.0f;
                     }
                 }
-                float t = (strictnessSlider - 1.0f) / 9.0f;
-                float tSpace = (sb.width > 14.0f) ? t * (sb.width - 14.0f) / sb.width : 0.0f;
+                f32 t = (strictnessSlider - 1.0f) / 9.0f;
+                f32 tSpace = (sb.width > 14.0f) ? t * (sb.width - 14.0f) / sb.width : 0.0f;
                 CLAY_AUTO_ID({ .layout = { .sizing = { CLAY_SIZING_PERCENT(tSpace), CLAY_SIZING_GROW(0) } } }) {}
                 CLAY(CLAY_ID("SliderThumb"), {
                     .layout = { .sizing = { CLAY_SIZING_FIXED(14), CLAY_SIZING_FIXED(14) } },
@@ -519,16 +520,16 @@ void UpdateLayout() {
                                 const auto& imgPath = duplicateGroups[gi][ji];
                                 SDL_Texture*& thumb = g_thumbTextures[gi][ji];
                                 if (!thumb) thumb = LoadThumb(imgPath);
-                                float tw = 150, th = 150;
+                                f32 tw = 150, th = 150;
                                 if (thumb) {
-                                    float fw, fh;
+                                    f32 fw, fh;
                                     SDL_GetTextureSize(thumb, &fw, &fh);
                                     tw = fw;
                                     th = fh;
                                 }
                                 bool selected  = (imgPath == selectedImagePath);
                                 bool isMarked  = g_markedPaths.count(imgPath) > 0;
-                                CLAY(CLAY_IDI("Thumb", (int)(gi * 1024 + ji)), {
+                                CLAY(CLAY_IDI("Thumb", (i32)(gi * 1024 + ji)), {
                                     .layout = { .sizing = { CLAY_SIZING_FIXED(tw + 10), CLAY_SIZING_FIXED(th + 10) },
                                                 .padding = {.left=5, .right=5, .top=5, .bottom=5} },
                                     .backgroundColor = isMarked  ? Clay_Color{80, 20, 20, 255}
@@ -536,7 +537,7 @@ void UpdateLayout() {
                                                      : (Clay_Hovered() ? cHover : cNone)
                                 }) {
                                     if (Clay_Hovered() && g_mouseLeftPressed)
-                                        OnImageClicked((int)gi, (int)ji);
+                                        OnImageClicked((i32)gi, (i32)ji);
                                     if (Clay_Hovered() && g_mouseRightPressed) {
                                         if (isMarked) g_markedPaths.erase(imgPath);
                                         else          g_markedPaths.insert(imgPath);
@@ -548,7 +549,7 @@ void UpdateLayout() {
                                         CLAY_AUTO_ID({ .layout = { .sizing = { CLAY_SIZING_FIXED(tw), CLAY_SIZING_FIXED(th) } },
                                                        .backgroundColor = {60, 60, 60, 255} }) {}
                                     if (isMarked) {
-                                        CLAY(CLAY_IDI("ThumbMark", (int)(gi * 1024 + ji)), {
+                                        CLAY(CLAY_IDI("ThumbMark", (i32)(gi * 1024 + ji)), {
                                             .layout = { .sizing = { CLAY_SIZING_FIXED(tw + 10), CLAY_SIZING_FIXED(th + 10) },
                                                         .childAlignment = { .x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER } },
                                             .backgroundColor = {0, 0, 0, 160},
@@ -572,15 +573,15 @@ void UpdateLayout() {
             // Scrollbar
             {
                 Clay_ScrollContainerData sd = Clay_GetScrollContainerData(Clay_GetElementId(CLAY_STRING("Section1_ScrollTable")));
-                float trackH   = sd.found ? sd.scrollContainerDimensions.height : 0.0f;
-                float contentH = sd.found ? sd.contentDimensions.height : 0.0f;
+                f32 trackH   = sd.found ? sd.scrollContainerDimensions.height : 0.0f;
+                f32 contentH = sd.found ? sd.contentDimensions.height : 0.0f;
                 bool  scroll   = sd.found && contentH > trackH + 1.0f;
-                float thumbH   = scroll ? (trackH * trackH / contentH) : trackH;
+                f32 thumbH   = scroll ? (trackH * trackH / contentH) : trackH;
                 if (thumbH < 20.0f) thumbH = 20.0f;
-                float scrollY  = (scroll && sd.scrollPosition) ? -sd.scrollPosition->y : 0.0f;
-                float maxScroll = contentH - trackH;
-                float ratio    = (scroll && maxScroll > 0.0f) ? scrollY / maxScroll : 0.0f;
-                float thumbTop = scroll ? ratio * (trackH - thumbH) : 0.0f;
+                f32 scrollY  = (scroll && sd.scrollPosition) ? -sd.scrollPosition->y : 0.0f;
+                f32 maxScroll = contentH - trackH;
+                f32 ratio    = (scroll && maxScroll > 0.0f) ? scrollY / maxScroll : 0.0f;
+                f32 thumbTop = scroll ? ratio * (trackH - thumbH) : 0.0f;
                 if (thumbTop < 0.0f) thumbTop = 0.0f;
                 if (thumbTop + thumbH > trackH) thumbTop = trackH - thumbH;
                 CLAY(CLAY_ID("ScrollTrack"), {
@@ -614,18 +615,18 @@ void UpdateLayout() {
                     } else {
                         SDL_Texture* prev = (g_selGi >= 0 && g_selJi >= 0) ? g_previewTextures[g_selGi][g_selJi] : nullptr;
                         if (prev) {
-                            float pw, ph;
+                            f32 pw, ph;
                             SDL_GetTextureSize(prev, &pw, &ph);
                             Clay_BoundingBox box = Clay_GetElementData(Clay_GetElementId(CLAY_STRING("ImageContainer"))).boundingBox;
                             if (box.width <= 1.0f || box.height <= 1.0f) {
-                                int ww, wh;
+                                i32 ww, wh;
                                 SDL_GetWindowSize(g_window, &ww, &wh);
                                 box.width  = ww * 0.5f;
-                                box.height = (float)wh - 100.0f;
+                                box.height = (f32)wh - 100.0f;
                             }
-                            float sx = (box.width  - 10.0f) / pw;
-                            float sy = (box.height - 10.0f) / ph;
-                            float sc = sx < sy ? sx : sy;
+                            f32 sx = (box.width  - 10.0f) / pw;
+                            f32 sy = (box.height - 10.0f) / ph;
+                            f32 sc = sx < sy ? sx : sy;
                             if (sc > 1.0f) sc = 1.0f;  // never upscale; native size if it fits
                             CLAY_AUTO_ID({ .layout = { .sizing = { CLAY_SIZING_FIXED(pw * sc), CLAY_SIZING_FIXED(ph * sc) } },
                                            .image = { .imageData = prev } }) {}
@@ -685,9 +686,9 @@ void UpdateLayout() {
                                 .childAlignment = {.x=CLAY_ALIGN_X_LEFT, .y=CLAY_ALIGN_Y_CENTER} },
                     .backgroundColor = cProps
                 }) {
-                    Clay_String sPath = { .length = (int32_t)selectedImagePath.size(), .chars = selectedImagePath.c_str() };
-                    Clay_String sRes  = { .length = (int32_t)selectedImageRes.size(),  .chars = selectedImageRes.c_str()  };
-                    Clay_String sSize = { .length = (int32_t)selectedImageSize.size(), .chars = selectedImageSize.c_str() };
+                    Clay_String sPath = { .length = (i32)selectedImagePath.size(), .chars = selectedImagePath.c_str() };
+                    Clay_String sRes  = { .length = (i32)selectedImageRes.size(),  .chars = selectedImageRes.c_str()  };
+                    Clay_String sSize = { .length = (i32)selectedImageSize.size(), .chars = selectedImageSize.c_str() };
                     CLAY_TEXT(sPath, CLAY_TEXT_CONFIG({ .textColor = cTextDim, .fontSize = 14 }));
                     CLAY_AUTO_ID({ .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(0) } } }) {}
                     CLAY_TEXT(sRes,  CLAY_TEXT_CONFIG({ .textColor = cTextDim, .fontSize = 14 }));

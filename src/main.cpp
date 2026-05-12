@@ -17,6 +17,7 @@
 #define CLAY_IMPLEMENTATION
 #include "clay.h"
 #include "renderers/SDL3/clay_renderer_SDL3.c"
+#include "core/types.h"
 #include "layout.h"
 #include "scan.h"
 
@@ -36,14 +37,14 @@ bool     g_alreadyRendered  = false;
 bool     g_shouldClose      = false;
 bool     g_pendingMaximize  = false;
 
-uint64_t g_lastTicks         = 0;
-float    g_fps               = 0.0f;
-uint64_t g_targetFrameNS     = 0;
+u64      g_lastTicks         = 0;
+f32      g_fps               = 0.0f;
+u64      g_targetFrameNS     = 0;
 Uint32   g_folderDialogEvent = 0;
 Uint32   g_scanDoneEvent     = 0;
 bool     g_scanning          = false;
 
-float       strictnessSlider  = 7.0f;
+f32         strictnessSlider  = 7.0f;
 std::string currentPath       = "Select a folder...";
 std::vector<std::string> selectedFolders;
 std::string selectedImagePath;
@@ -56,20 +57,20 @@ static Clay_Dimensions SDL3_MeasureText(Clay_StringSlice text, Clay_TextElementC
 {
     TTF_Font* font = ((TTF_Font**)userData)[config->fontId];
     if (!font || text.length == 0) return {0, 0};
-    TTF_SetFontSizeDPI(font, (float)config->fontSize, 72, 72);
-    int w = 0, h = 0;
+    TTF_SetFontSizeDPI(font, (f32)config->fontSize, 72, 72);
+    i32 w = 0, h = 0;
     TTF_GetStringSize(font, text.chars, (size_t)text.length, &w, &h);
-    return {(float)w, (float)h};
+    return {(f32)w, (f32)h};
 }
 
 
-static void RenderFrame(float dt) 
+static void RenderFrame(f32 dt) 
 {
-    int w, h;
-    float mx, my;
+    i32 w, h;
+    f32 mx, my;
     SDL_GetWindowSize(g_window, &w, &h);
     SDL_GetMouseState(&mx, &my);
-    Clay_SetLayoutDimensions({(float)w, (float)h});
+    Clay_SetLayoutDimensions({(f32)w, (f32)h});
     Clay_SetPointerState({mx, my}, g_mouseLeftDown);
     UpdateLayout();
     SDL_SetRenderDrawColor(g_sdlRenderer, 0x2E, 0x2C, 0x29, 0xFF);
@@ -88,9 +89,9 @@ static void RenderFrame(float dt)
 
 static SDL_HitTestResult HitTestCallback(SDL_Window* win, const SDL_Point* area, void*) 
 {
-    int w, h;
+    i32 w, h;
     SDL_GetWindowSize(win, &w, &h);
-    const int BORDER = 8, TITLE_H = 30, BTNS_W = 151;
+    const i32 BORDER = 8, TITLE_H = 30, BTNS_W = 151;
 
     if (!(SDL_GetWindowFlags(win) & SDL_WINDOW_MAXIMIZED)) {
         bool onL = area->x < BORDER, onR = area->x >= w - BORDER;
@@ -114,7 +115,7 @@ static bool SDLCALL ResizeEventWatcher(void*, SDL_Event* ev)
 {
     if (ev->type == SDL_EVENT_WINDOW_RESIZED || ev->type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) 
     {
-        float dt = g_lastTicks ? (float)(SDL_GetTicks() - g_lastTicks) / 1000.0f : 0.016f;
+        f32 dt = g_lastTicks ? (f32)(SDL_GetTicks() - g_lastTicks) / 1000.0f : 0.016f;
         g_mouseLeftPressed = false;  // prevent button re-trigger during re-entrant render
         RenderFrame(dt);
         g_alreadyRendered = true;
@@ -127,11 +128,11 @@ static void UpdateFrameTarget()
 {
     SDL_DisplayID          disp = SDL_GetDisplayForWindow(g_window);
     const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(disp);
-    float hz = (mode && mode->refresh_rate > 0.0f) ? mode->refresh_rate : 60.0f;
-    g_targetFrameNS = (uint64_t)(1e9 / hz);
+    f32 hz = (mode && mode->refresh_rate > 0.0f) ? mode->refresh_rate : 60.0f;
+    g_targetFrameNS = (u64)(1e9 / hz);
 }
 
-int main(int argc, char* argv[]) 
+i32 main(i32 argc, char* argv[]) 
 {
     
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS)) return -1;
@@ -184,7 +185,7 @@ int main(int argc, char* argv[])
     }
 
     // Load titlebar icon SVGs
-    auto loadSvgIcon = [&](const char* name, int w, int h) -> SDL_Texture* {
+    auto loadSvgIcon = [&](const char* name, i32 w, i32 h) -> SDL_Texture* {
         SDL_snprintf(path, sizeof(path), "%sassets/%s", base ? base : "", name);
         SDL_Surface* s = IMG_LoadSizedSVG_IO(SDL_IOFromFile(path, "rb"), w, h);
         if (!s) return nullptr;
@@ -202,7 +203,7 @@ int main(int argc, char* argv[])
     Clay_SDL3RendererData rdData = { g_sdlRenderer, textEngine, fonts };
     g_rendererData = &rdData;
 
-    uint64_t clayMemSz = Clay_MinMemorySize();
+    u64 clayMemSz = Clay_MinMemorySize();
     Clay_Initialize(
         Clay_CreateArenaWithCapacityAndMemory(clayMemSz, (char*)malloc(clayMemSz)),
         Clay_Dimensions{1280, 720},
@@ -218,17 +219,17 @@ int main(int argc, char* argv[])
     SDL_AddEventWatch(ResizeEventWatcher, nullptr);
 
     g_lastTicks = SDL_GetTicks();
-    uint64_t fpsTimerTick = g_lastTicks;
-    int fpsFrames = 0;
+    u64 fpsTimerTick = g_lastTicks;
+    i32 fpsFrames = 0;
 
     // Main loop
     while (!g_shouldClose) 
     {
-        uint64_t frameStart = SDL_GetTicksNS();
+        u64 frameStart = SDL_GetTicksNS();
         g_mouseLeftPressed  = false;
         g_mouseRightPressed = false;
         g_alreadyRendered   = false;
-        float scrollY       = 0.0f;
+        f32 scrollY       = 0.0f;
 
         SDL_Event ev;
         bool quit = false;
@@ -279,14 +280,14 @@ int main(int argc, char* argv[])
         }
         if (quit) break;
 
-        uint64_t now = SDL_GetTicks();
-        float dt = (float)(now - g_lastTicks) / 1000.0f;
+        u64 now = SDL_GetTicks();
+        f32 dt = (f32)(now - g_lastTicks) / 1000.0f;
         if (dt <= 0.0f) dt = 0.016f;
         g_lastTicks = now;
 
         fpsFrames++;
         if (now - fpsTimerTick >= 1000) {
-            g_fps = fpsFrames * 1000.0f / (float)(now - fpsTimerTick);
+            g_fps = fpsFrames * 1000.0f / (f32)(now - fpsTimerTick);
             fpsFrames = 0;
             fpsTimerTick = now;
         }
@@ -294,7 +295,7 @@ int main(int argc, char* argv[])
         Clay_UpdateScrollContainers(true, {0.0f, scrollY}, dt);
         if (!g_alreadyRendered) RenderFrame(dt);
 
-        uint64_t elapsed = SDL_GetTicksNS() - frameStart;
+        u64 elapsed = SDL_GetTicksNS() - frameStart;
         if (g_targetFrameNS > elapsed) SDL_DelayNS(g_targetFrameNS - elapsed);
     }
 

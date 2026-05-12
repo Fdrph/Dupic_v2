@@ -13,6 +13,7 @@
 #include <SDL3/SDL.h>
 #include <vips/vips.h>
 
+#include "core/types.h"
 #include "scan.h"
 
 // Hint to the compiler that a loop is independent and should be vectorized
@@ -31,10 +32,10 @@ namespace fs = std::filesystem;
 
 extern Uint32 g_scanDoneEvent;
 
-static constexpr int BITS = 16;  // 16x16 blocks = 256-bit hash
-using Blocks = std::array<float, BITS * BITS>;
+static constexpr i32 BITS = 16;  // 16x16 blocks = 256-bit hash
+using Blocks = std::array<f32, BITS * BITS>;
 struct alignas(32) BlockHash {
-    uint64_t data[4];
+    u64 data[4];
 };
 
 // ── File gathering ──────────────────────────────────────────────────────────
@@ -76,17 +77,17 @@ static std::vector<std::string> GatherFiles(const std::vector<std::string>& fold
 // Uses lower+upper-middle average for even-length arrays.
 static BlockHash FinalizeHash(Blocks& b)
 {
-    constexpr int Q = BITS * BITS / 4;  // 64, always even
-    std::array<float, Q> tmp;
+    constexpr i32 Q = BITS * BITS / 4;  // 64, always even
+    std::array<f32, Q> tmp;
     BlockHash hash = {};
-    for (int q = 0; q < 4; q++) 
+    for (i32 q = 0; q < 4; q++) 
     {
         std::copy_n(b.data() + q * Q, Q, tmp.begin());
         std::nth_element(tmp.begin(), tmp.begin() + Q / 2, tmp.end());
-        float med2 = tmp[Q / 2];
-        float med1 = *std::max_element(tmp.begin(), tmp.begin() + Q / 2);
-        float med = (med1 + med2) / 2.0f;
-        for (int i = 0; i < Q; i++) 
+        f32 med2 = tmp[Q / 2];
+        f32 med1 = *std::max_element(tmp.begin(), tmp.begin() + Q / 2);
+        f32 med = (med1 + med2) / 2.0f;
+        for (i32 i = 0; i < Q; i++) 
         {
             if (b[q * Q + i] >= med) hash.data[q] |= 1ULL << i;
         }
@@ -95,19 +96,19 @@ static BlockHash FinalizeHash(Blocks& b)
 }
 
 // bmvbhash_even: image dims exactly divisible by BITS
-static BlockHash BmvbHashEven(const uint8_t* data, int w, int h, int ch)
+static BlockHash BmvbHashEven(const u8* data, i32 w, i32 h, i32 ch)
 {
-    const int bx = w / BITS, by = h / BITS;
+    const i32 bx = w / BITS, by = h / BITS;
     Blocks result = {};
-    for (int y = 0; y < h; y++) 
+    for (i32 y = 0; y < h; y++) 
     {
-        int y_offset = (y / by) * BITS;
-        const uint8_t* row_data = data + (y * w * ch);
-        for (int x = 0; x < w; x++) 
+        i32 y_offset = (y / by) * BITS;
+        const u8* row_data = data + (y * w * ch);
+        for (i32 x = 0; x < w; x++) 
         {
-            int i = x * ch;
-            float v = (ch == 4 && row_data[i + 3] == 0) ? 765.0f
-                    : (float)(row_data[i] + row_data[i + 1] + row_data[i + 2]);
+            i32 i = x * ch;
+            f32 v = (ch == 4 && row_data[i + 3] == 0) ? 765.0f
+                    : (f32)(row_data[i] + row_data[i + 1] + row_data[i + 2]);
             result[y_offset + (x / bx)] += v;
         }
     }
@@ -115,43 +116,43 @@ static BlockHash BmvbHashEven(const uint8_t* data, int w, int h, int ch)
 }
 
 // bmvbhash: general case with sub-pixel weighted block accumulation
-static BlockHash BmvbHash(const uint8_t* data, int w, int h, int ch)
+static BlockHash BmvbHash(const u8* data, i32 w, i32 h, i32 ch)
 {
     if (w % BITS == 0 && h % BITS == 0) return BmvbHashEven(data, w, h, ch);
 
-    const float bw = (float)w / BITS, bh = (float)h / BITS;
+    const f32 bw = (f32)w / BITS, bh = (f32)h / BITS;
     
-    struct Weight { int i1, i2; float w1, w2; };
+    struct Weight { i32 i1, i2; f32 w1, w2; };
     // Image size is always capped by vips_thumbnail in ComputeBlockHash
     Weight wx[256], wy[256];
 
-    for (int x = 0; x < w; x++) 
+    for (i32 x = 0; x < w; x++) 
     {
-        float xm = fmodf((float)(x + 1), bw);
-        float xf = xm - floorf(xm);
-        int bl = (int)((float)x / bw);
-        int br = (xm - xf > 0.0f || (x + 1) == w) ? bl : (int)ceilf((float)x / bw);
+        f32 xm = fmodf((f32)(x + 1), bw);
+        f32 xf = xm - floorf(xm);
+        i32 bl = (i32)((f32)x / bw);
+        i32 br = (xm - xf > 0.0f || (x + 1) == w) ? bl : (i32)ceilf((f32)x / bw);
         wx[x] = {bl, br, 1.0f - xf, xf};
     }
-    for (int y = 0; y < h; y++) 
+    for (i32 y = 0; y < h; y++) 
     {
-        float ym = fmodf((float)(y + 1), bh);
-        float yf = ym - floorf(ym);
-        int bt = (int)((float)y / bh);
-        int bb = (ym - yf > 0.0f || (y + 1) == h) ? bt : (int)ceilf((float)y / bh);
+        f32 ym = fmodf((f32)(y + 1), bh);
+        f32 yf = ym - floorf(ym);
+        i32 bt = (i32)((f32)y / bh);
+        i32 bb = (ym - yf > 0.0f || (y + 1) == h) ? bt : (i32)ceilf((f32)y / bh);
         wy[y] = {bt, bb, 1.0f - yf, yf};
     }
 
     Blocks blocks = {};
-    for (int y = 0; y < h; y++) 
+    for (i32 y = 0; y < h; y++) 
     {
         const auto& Y = wy[y];
-        const uint8_t* row_data = data + (y * w * ch);
-        for (int x = 0; x < w; x++) 
+        const u8* row_data = data + (y * w * ch);
+        for (i32 x = 0; x < w; x++) 
         {
             const auto& X = wx[x];
-            int i = x * ch;
-            float v = (ch == 4 && row_data[i + 3] == 0) ? 765.0f : (float)(row_data[i] + row_data[i + 1] + row_data[i + 2]);
+            i32 i = x * ch;
+            f32 v = (ch == 4 && row_data[i + 3] == 0) ? 765.0f : (f32)(row_data[i] + row_data[i + 1] + row_data[i + 2]);
             
             // Unrolled accumulation
             if (Y.i1 < BITS && X.i1 < BITS) blocks[Y.i1 * BITS + X.i1] += v * Y.w1 * X.w1;
@@ -186,14 +187,14 @@ static BlockHash ComputeBlockHash(const std::string& path)
 
     size_t sz;
     void* mem = vips_image_write_to_memory(img, &sz); // vips only actually works on the image here
-    int w = vips_image_get_width(img);
-    int h = vips_image_get_height(img);
-    int bands = vips_image_get_bands(img);
+    i32 w = vips_image_get_width(img);
+    i32 h = vips_image_get_height(img);
+    i32 bands = vips_image_get_bands(img);
     g_object_unref(img);
 
     if (!mem) return {};
 
-    BlockHash hash = BmvbHash(static_cast<const uint8_t*>(mem), w, h, bands);
+    BlockHash hash = BmvbHash(static_cast<const u8*>(mem), w, h, bands);
     g_free(mem);
     return hash;
 }
@@ -215,17 +216,17 @@ void InvalidateScanCache()
 }
 
 // ── Background search thread ────────────────────────────────────────────────
-static void SearchThread(std::vector<std::string> folders, float threshold)
+static void SearchThread(std::vector<std::string> folders, f32 threshold)
 {
     // slider 1 (strict) -> maxDist 4, slider 10 (relaxed) -> maxDist 40
-    const int maxDist = (int)(threshold * 4.0f);
+    const i32 maxDist = (i32)(threshold * 4.0f);
 
     if (s_cachedFiles.empty()) {
         // Fresh hash run 
         std::vector<std::string> files = GatherFiles(folders);
         const size_t n = files.size();
 
-        const int nworkers = std::max(1, (int)std::thread::hardware_concurrency() - 1) - 1;
+        const i32 nworkers = std::max(1, (i32)std::thread::hardware_concurrency() - 1) - 1;
         vips_concurrency_set(1);
         vips_cache_set_max(0);
 
@@ -246,7 +247,7 @@ static void SearchThread(std::vector<std::string> folders, float threshold)
 
         std::vector<std::thread> workers;
         workers.reserve(nworkers);
-        for (int i = 0; i < nworkers; i++) { workers.emplace_back(work); }
+        for (i32 i = 0; i < nworkers; i++) { workers.emplace_back(work); }
         work();
         for (auto& t : workers) { t.join(); }
 
@@ -257,9 +258,9 @@ static void SearchThread(std::vector<std::string> folders, float threshold)
 
     // ── Union-Find (always runs, uses cached data directly) ─────────────────
     const size_t n = s_cachedFiles.size();
-    std::vector<int> parent(n);
+    std::vector<i32> parent(n);
     std::iota(parent.begin(), parent.end(), 0);
-    auto find = [&](int x) {
+    auto find = [&](i32 x) {
         while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; }
         return x;
     };
@@ -271,14 +272,14 @@ static void SearchThread(std::vector<std::string> folders, float threshold)
         for (size_t j = i + 1; j < n; j++) {
             const BlockHash& hj = s_cachedHashes[j];
 
-            int hamming = std::popcount(hi.data[0] ^ hj.data[0]) +
+            i32 hamming = std::popcount(hi.data[0] ^ hj.data[0]) +
                           std::popcount(hi.data[1] ^ hj.data[1]) +
                           std::popcount(hi.data[2] ^ hj.data[2]) +
                           std::popcount(hi.data[3] ^ hj.data[3]);
 
             if (hamming <= maxDist) {
-                int rootI = find((int)i);
-                int rootJ = find((int)j);
+                i32 rootI = find((i32)i);
+                i32 rootJ = find((i32)j);
                 if (rootI != rootJ) parent[rootI] = rootJ;
             }
         }
@@ -300,7 +301,7 @@ static void SearchThread(std::vector<std::string> folders, float threshold)
     SDL_PushEvent(&ev);
 }
 
-void StartDuplicateSearch(const std::vector<std::string>& folders, float threshold)
+void StartDuplicateSearch(const std::vector<std::string>& folders, f32 threshold)
 {
     std::thread(SearchThread, folders, threshold).detach();
 }

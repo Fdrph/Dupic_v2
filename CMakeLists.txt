@@ -11,14 +11,14 @@ find_package(SDL3_ttf REQUIRED CONFIG)
 find_package(SDL3_image REQUIRED CONFIG)
 
 # --- External Path for libvips ---
-set(VIPS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/vips")
+set(VIPS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/vips")
 
 # --- Define Executable ---
 add_executable(${PROJECT_NAME} 
-    main.cpp
-    layout.cpp
-    scan.cpp
-    app.rc
+    src/main.cpp
+    src/layout.cpp
+    src/scan.cpp
+    src/app.rc
 )
 
 if(MSVC)
@@ -35,7 +35,8 @@ set_target_properties(${PROJECT_NAME} PROPERTIES WIN32_EXECUTABLE TRUE)
 
 # --- Include Directories ---
 target_include_directories(${PROJECT_NAME} PRIVATE 
-    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/clay"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core"
+    "${CMAKE_CURRENT_SOURCE_DIR}/external/clay"
     "${VIPS_DIR}/include"
     "${VIPS_DIR}/include/glib-2.0"
     "${VIPS_DIR}/lib/glib-2.0/include"
